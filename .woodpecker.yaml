@@ -1,0 +1,23 @@
+when:
+  - event: push
+  - event: pull_request
+  - event: manual
+
+steps:
+  - name: format
+    image: localhost/rust-ci:local
+    pull: false
+    commands:
+      - cargo fmt --all -- --check
+
+  - name: clippy
+    image: localhost/rust-ci:local
+    pull: false
+    commands:
+      - cargo clippy --all-targets -- -D warnings
+
+  - name: test
+    image: localhost/rust-ci:local
+    pull: false
+    commands:
+      - cargo test --all-targets

@@ -39,6 +39,9 @@ pub(crate) struct RowId {
 
 #[derive(Error, Debug)]
 pub enum DbError {
-    #[error("Nothing specific here")]
-    UnknownError, // placeholder
+    #[error("no table with name {0}")]
+    TableNotFound(String),
+
+    #[error("no row with {0:?}")]
+    RowNotFound(RowId),
 }

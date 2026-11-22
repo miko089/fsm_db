@@ -15,9 +15,9 @@ pub(crate) enum Value {
 pub(crate) struct Expr {}
 
 pub(crate) struct Fsm {
-    states: Vec<String>,
-    initial: u16,
-    allowed: HashMap<(u16, u16), Expr>,
+    pub(crate) states: Vec<String>,
+    pub(crate) initial: u16,
+    pub(crate) allowed: HashMap<(u16, u16), Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +41,12 @@ pub(crate) struct RowId {
 pub enum DbError {
     #[error("no table with name {0}")]
     TableNotFound(String),
+
+    #[error("table already exists: {0}")]
+    TableAlreadyExists(String),
+
+    #[error("invalid schema: {0}")]
+    InvalidSchema(String),
 
     #[error("no row with {0:?}")]
     RowNotFound(RowId),

@@ -8,14 +8,16 @@ struct InMemoryStorage {
     last: usize,
 }
 
-impl Storage for InMemoryStorage {
+impl InMemoryStorage {
     fn new() -> Self {
         InMemoryStorage {
             tables: HashMap::new(),
             last: 0,
         }
     }
+}
 
+impl Storage for InMemoryStorage {
     fn insert(&mut self, table: &str, row: Row) -> Result<RowId, crate::types::DbError> {
         let row_id = RowId {
             page_id: (self.last >> 16) as u32,

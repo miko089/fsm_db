@@ -1,5 +1,7 @@
 mod in_memory;
 
+pub(crate) use in_memory::InMemoryCatalog;
+
 use crate::types::{ColumnType, DbError, Fsm};
 
 pub(crate) struct Column {

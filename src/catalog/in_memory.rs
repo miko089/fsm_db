@@ -301,4 +301,50 @@ mod tests {
             DbError::InvalidSchema(_)
         ));
     }
+
+    #[test]
+    fn test_valid_fsm() {
+        let mut catalog = InMemoryCatalog::new();
+
+        let mut allowed = HashMap::new();
+        allowed.insert((0, 1), Expr {});
+        allowed.insert((1, 2), Expr {});
+
+        let schema = TableSchema {
+            name: "tasks".to_string(),
+            columns: vec![
+                Column {
+                    name: "id".to_string(),
+                    column_type: ColumnType::Integer,
+                },
+                Column {
+                    name: "state".to_string(),
+                    column_type: ColumnType::Fsm(0),
+                },
+            ],
+            fsms: vec![Fsm {
+                states: vec![
+                    "pending".to_string(),
+                    "in_progress".to_string(),
+                    "done".to_string(),
+                ],
+                initial: 0,
+                allowed,
+            }],
+        };
+
+        catalog.create_table(schema).unwrap();
+
+        let stored = catalog.get_table("tasks").unwrap().unwrap();
+        assert_eq!(stored.columns.len(), 2);
+        assert_eq!(stored.fsms.len(), 1);
+        assert_eq!(
+            stored.fsms[0].states,
+            vec!["pending", "in_progress", "done"]
+        );
+        assert_eq!(stored.fsms[0].initial, 0);
+        assert_eq!(stored.fsms[0].allowed.len(), 2);
+        assert!(stored.fsms[0].allowed.contains_key(&(0, 1)));
+        assert!(stored.fsms[0].allowed.contains_key(&(1, 2)));
+    }
 }

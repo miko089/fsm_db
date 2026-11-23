@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::catalog::{Catalog, TableSchema};
-use crate::types::{ColumnType, DbError, Fsm};
+use crate::types::DbError;
 
 pub(crate) struct InMemoryCatalog {
     tables: HashMap<String, TableSchema>,
@@ -13,68 +13,6 @@ impl InMemoryCatalog {
             tables: HashMap::new(),
         }
     }
-
-    fn validate_schema(schema: &TableSchema) -> Result<(), DbError> {
-        let mut column_names = HashSet::with_capacity(schema.columns.len());
-        for col in &schema.columns {
-            if !column_names.insert(col.name.as_str()) {
-                return Err(DbError::InvalidSchema(format!(
-                    "duplicate column name: {}",
-                    col.name
-                )));
-            }
-            if let ColumnType::Fsm(fsm_idx) = col.column_type
-                && (fsm_idx as usize) >= schema.fsms.len()
-            {
-                return Err(DbError::InvalidSchema(format!(
-                    "fsm index {} out of bounds for table {}",
-                    fsm_idx, schema.name
-                )));
-            }
-        }
-
-        for (idx, fsm) in schema.fsms.iter().enumerate() {
-            Self::validate_fsm(idx, fsm)?;
-        }
-
-        Ok(())
-    }
-
-    fn validate_fsm(fsm_idx: usize, fsm: &Fsm) -> Result<(), DbError> {
-        if fsm.states.is_empty() {
-            return Err(DbError::InvalidSchema(format!(
-                "fsm {} has no states",
-                fsm_idx
-            )));
-        }
-        if (fsm.initial as usize) >= fsm.states.len() {
-            return Err(DbError::InvalidSchema(format!(
-                "fsm {} initial state {} out of bounds",
-                fsm_idx, fsm.initial
-            )));
-        }
-
-        let mut state_names = HashSet::with_capacity(fsm.states.len());
-        for state in &fsm.states {
-            if !state_names.insert(state.as_str()) {
-                return Err(DbError::InvalidSchema(format!(
-                    "fsm {} has duplicate state name: {}",
-                    fsm_idx, state
-                )));
-            }
-        }
-
-        for &(from, to) in fsm.allowed.keys() {
-            if (from as usize) >= fsm.states.len() || (to as usize) >= fsm.states.len() {
-                return Err(DbError::InvalidSchema(format!(
-                    "fsm {} transition ({}, {}) out of bounds",
-                    fsm_idx, from, to
-                )));
-            }
-        }
-
-        Ok(())
-    }
 }
 
 impl Catalog for InMemoryCatalog {
@@ -82,7 +20,7 @@ impl Catalog for InMemoryCatalog {
         if self.tables.contains_key(&schema.name) {
             return Err(DbError::TableAlreadyExists(schema.name));
         }
-        Self::validate_schema(&schema)?;
+        schema.validate()?;
         self.tables.insert(schema.name.clone(), schema);
         Ok(())
     }

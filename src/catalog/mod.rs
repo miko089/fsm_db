@@ -1,5 +1,8 @@
 mod in_memory;
 
+#[cfg(test)]
+pub(crate) use in_memory::InMemoryCatalog;
+
 use std::collections::HashSet;
 
 use crate::types::{ColumnType, DbError, Fsm};

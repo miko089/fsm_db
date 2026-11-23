@@ -8,7 +8,7 @@ pub(crate) struct InMemoryCatalog {
 }
 
 impl InMemoryCatalog {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             tables: HashMap::new(),
         }

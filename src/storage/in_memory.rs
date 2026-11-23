@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use crate::storage::Storage;
 use crate::types::{DbError, Row, RowId};
 
-struct InMemoryStorage {
+pub(crate) struct InMemoryStorage {
     tables: HashMap<String, Vec<(RowId, Row)>>,
     last: usize,
 }
 
 impl InMemoryStorage {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         InMemoryStorage {
             tables: HashMap::new(),
             last: 0,

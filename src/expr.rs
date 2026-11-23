@@ -12,6 +12,10 @@ pub(crate) enum BinaryOp {
     Ge,  // >=
     And, // AND
     Or,  // OR
+    Add, // +
+    Sub, // -
+    Mul, // *
+    Div, // /
 }
 
 #[derive(Debug, Clone)]
@@ -62,7 +66,28 @@ fn eval_ord<T: PartialOrd>(op: &BinaryOp, a: &T, b: &T) -> Option<bool> {
         BinaryOp::Le => Some(a <= b),
         BinaryOp::Gt => Some(a > b),
         BinaryOp::Ge => Some(a >= b),
-        BinaryOp::And | BinaryOp::Or => None,
+        _ => None,
+    }
+}
+
+fn eval_arith(op: &BinaryOp, lhs: &Value, rhs: &Value) -> Option<Value> {
+    match (lhs, rhs) {
+        (Value::Null, _) | (_, Value::Null) => Some(Value::Null),
+        (Value::Integer(a), Value::Integer(b)) => match op {
+            BinaryOp::Add => a.checked_add(*b).map(Value::Integer),
+            BinaryOp::Sub => a.checked_sub(*b).map(Value::Integer),
+            BinaryOp::Mul => a.checked_mul(*b).map(Value::Integer),
+            BinaryOp::Div => a.checked_div(*b).map(Value::Integer),
+            _ => None,
+        },
+        (Value::Float(a), Value::Float(b)) => match op {
+            BinaryOp::Add => Some(Value::Float(a + b)),
+            BinaryOp::Sub => Some(Value::Float(a - b)),
+            BinaryOp::Mul => Some(Value::Float(a * b)),
+            BinaryOp::Div => (*b != 0.0).then(|| Value::Float(a / b)),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -107,6 +132,11 @@ pub(crate) fn eval_expr(expr: &Expr, row: &Row, clock: &dyn Clock) -> Result<Val
                 },
                 _ => Err(DbError::EvalError(expr.clone())),
             },
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                let lhs = eval_expr(left, row, clock)?;
+                let rhs = eval_expr(right, row, clock)?;
+                eval_arith(op, &lhs, &rhs).ok_or_else(|| DbError::EvalError(expr.clone()))
+            }
             _ => {
                 let lhs = eval_expr(left, row, clock)?;
                 let rhs = eval_expr(right, row, clock)?;
@@ -230,6 +260,44 @@ mod tests {
         let non_bool = Expr::Literal(Value::Integer(42));
         assert!(matches!(
             eval_predicate(&non_bool, &row, &clock),
+            Err(DbError::EvalError(_))
+        ));
+    }
+
+    #[test]
+    fn basic_arithmetic() {
+        let clock = MockClock { now: 0 };
+        let row = vec![Value::Integer(10), Value::Integer(3), Value::Float(2.5)];
+
+        let cases = [
+            (BinaryOp::Add, Expr::Column(0), Expr::Column(1), Value::Integer(13)),
+            (BinaryOp::Sub, Expr::Column(0), Expr::Column(1), Value::Integer(7)),
+            (BinaryOp::Mul, Expr::Column(0), Expr::Column(1), Value::Integer(30)),
+            (BinaryOp::Div, Expr::Column(0), Expr::Column(1), Value::Integer(3)),
+            (
+                BinaryOp::Mul,
+                Expr::Column(2),
+                Expr::Literal(Value::Float(4.0)),
+                Value::Float(10.0),
+            ),
+        ];
+
+        for (op, left, right, expected) in cases {
+            let expr = Expr::Binary {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+            assert_eq!(eval_expr(&expr, &row, &clock).unwrap(), expected);
+        }
+
+        let div_by_zero = Expr::Binary {
+            op: BinaryOp::Div,
+            left: Box::new(Expr::Column(0)),
+            right: Box::new(Expr::Literal(Value::Integer(0))),
+        };
+        assert!(matches!(
+            eval_expr(&div_by_zero, &row, &clock),
             Err(DbError::EvalError(_))
         ));
     }

@@ -34,7 +34,7 @@ impl Catalog for InMemoryCatalog {
 mod tests {
     use super::*;
     use crate::catalog::{Column, TableSchema};
-    use crate::types::{ColumnType, DbError, Expr, Fsm};
+    use crate::types::{ColumnType, DbError, Expr, Fsm, Value};
     use std::collections::HashMap;
 
     #[test]
@@ -200,7 +200,7 @@ mod tests {
         let mut catalog = InMemoryCatalog::new();
 
         let mut allowed_bad_to = HashMap::new();
-        allowed_bad_to.insert((0, 2), Expr {});
+        allowed_bad_to.insert((0, 2), Expr::Literal(Value::Bool(true)));
 
         let schema_bad_to = TableSchema {
             name: "tasks_bad_to".to_string(),
@@ -220,7 +220,7 @@ mod tests {
         ));
 
         let mut allowed_bad_from = HashMap::new();
-        allowed_bad_from.insert((2, 0), Expr {});
+        allowed_bad_from.insert((2, 0), Expr::Literal(Value::Bool(true)));
 
         let schema_bad_from = TableSchema {
             name: "tasks_bad_from".to_string(),
@@ -245,8 +245,8 @@ mod tests {
         let mut catalog = InMemoryCatalog::new();
 
         let mut allowed = HashMap::new();
-        allowed.insert((0, 1), Expr {});
-        allowed.insert((1, 2), Expr {});
+        allowed.insert((0, 1), Expr::Literal(Value::Bool(true)));
+        allowed.insert((1, 2), Expr::Literal(Value::Bool(true)));
 
         let schema = TableSchema {
             name: "tasks".to_string(),

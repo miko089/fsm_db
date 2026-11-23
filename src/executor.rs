@@ -291,7 +291,10 @@ mod tests {
         results.sort_by_key(|(id, _)| *id);
 
         let mut expected = vec![
-            (Some(stored_match), vec![Value::Integer(10), Value::Bool(true)]),
+            (
+                Some(stored_match),
+                vec![Value::Integer(10), Value::Bool(true)],
+            ),
             (Some(tx_match), vec![Value::Integer(7), Value::Bool(false)]),
         ];
         expected.sort_by_key(|(id, _)| *id);

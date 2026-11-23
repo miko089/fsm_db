@@ -58,6 +58,9 @@ pub enum DbError {
     #[error("lex error: {0}")]
     LexError(String),
 
+    #[error("parse error: {0}")]
+    ParseError(String),
+
     #[error("execution error: {0}")]
     ExecError(String),
 }

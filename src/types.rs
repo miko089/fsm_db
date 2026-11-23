@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use thiserror::Error;
 
+pub(crate) use crate::expr::Expr;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Value {
     Integer(i64),
@@ -10,9 +12,8 @@ pub(crate) enum Value {
     Fsm(u16),
     Bool(bool),
     String(String),
+    Null,
 }
-
-pub(crate) struct Expr {}
 
 pub(crate) struct Fsm {
     pub(crate) states: Vec<String>,
@@ -50,4 +51,7 @@ pub enum DbError {
 
     #[error("no row with {0:?}")]
     RowNotFound(RowId),
+
+    #[error("evaluation error on: {0:?}")]
+    EvalError(Expr),
 }

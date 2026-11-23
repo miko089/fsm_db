@@ -270,10 +270,30 @@ mod tests {
         let row = vec![Value::Integer(10), Value::Integer(3), Value::Float(2.5)];
 
         let cases = [
-            (BinaryOp::Add, Expr::Column(0), Expr::Column(1), Value::Integer(13)),
-            (BinaryOp::Sub, Expr::Column(0), Expr::Column(1), Value::Integer(7)),
-            (BinaryOp::Mul, Expr::Column(0), Expr::Column(1), Value::Integer(30)),
-            (BinaryOp::Div, Expr::Column(0), Expr::Column(1), Value::Integer(3)),
+            (
+                BinaryOp::Add,
+                Expr::Column(0),
+                Expr::Column(1),
+                Value::Integer(13),
+            ),
+            (
+                BinaryOp::Sub,
+                Expr::Column(0),
+                Expr::Column(1),
+                Value::Integer(7),
+            ),
+            (
+                BinaryOp::Mul,
+                Expr::Column(0),
+                Expr::Column(1),
+                Value::Integer(30),
+            ),
+            (
+                BinaryOp::Div,
+                Expr::Column(0),
+                Expr::Column(1),
+                Value::Integer(3),
+            ),
             (
                 BinaryOp::Mul,
                 Expr::Column(2),

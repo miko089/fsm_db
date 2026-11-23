@@ -39,6 +39,9 @@ pub(crate) enum Executor {
         input: Box<Executor>,
         remaining: usize,
     },
+    SingleRow {
+        done: bool,
+    },
 }
 
 pub(crate) struct ExecContext<'a, S: Storage> {
@@ -51,13 +54,16 @@ impl Executor {
     pub(crate) fn next<S: Storage>(
         &mut self,
         ctx: &mut ExecContext<S>,
-    ) -> Result<Option<(RowId, Row)>, DbError> {
+    ) -> Result<Option<(Option<RowId>, Row)>, DbError> {
         match self {
             Executor::SeqScan { table, rows } => {
                 if rows.is_none() {
                     *rows = Some(ctx.tx.scan(ctx.storage, table)?.into_iter());
                 }
-                Ok(rows.as_mut().and_then(|iter| iter.next()))
+                Ok(rows
+                    .as_mut()
+                    .and_then(|iter| iter.next())
+                    .map(|(row_id, row)| (Some(row_id), row)))
             }
             Executor::Filter { input, predicate } => {
                 while let Some((row_id, row)) = input.next(ctx)? {
@@ -82,7 +88,7 @@ impl Executor {
                     return Ok(None);
                 };
                 let row_id = ctx.tx.insert(table, row.clone());
-                Ok(Some((row_id, row)))
+                Ok(Some((Some(row_id), row)))
             }
             Executor::Update {
                 table,
@@ -93,6 +99,9 @@ impl Executor {
                 if results.is_none() {
                     let mut staged = Vec::new();
                     while let Some((row_id, row)) = input.next(ctx)? {
+                        let row_id = row_id.ok_or_else(|| {
+                            DbError::ExecError("Update input must yield RowId".to_string())
+                        })?;
                         let mut new_row = row.clone();
                         for (col_idx, expr) in sets.iter() {
                             let val = eval_expr(expr, &row, ctx.clock)?;
@@ -109,7 +118,10 @@ impl Executor {
                     }
                     *results = Some(staged.into_iter());
                 }
-                Ok(results.as_mut().and_then(|iter| iter.next()))
+                Ok(results
+                    .as_mut()
+                    .and_then(|iter| iter.next())
+                    .map(|(row_id, row)| (Some(row_id), row)))
             }
             Executor::Delete {
                 table,
@@ -118,15 +130,21 @@ impl Executor {
             } => {
                 if results.is_none() {
                     let mut staged = Vec::new();
-                    while let Some(item) = input.next(ctx)? {
-                        staged.push(item);
+                    while let Some((row_id, row)) = input.next(ctx)? {
+                        let row_id = row_id.ok_or_else(|| {
+                            DbError::ExecError("Delete input must yield RowId".to_string())
+                        })?;
+                        staged.push((row_id, row));
                     }
                     for (row_id, _row) in staged.iter() {
                         ctx.tx.delete(ctx.storage, table, *row_id)?;
                     }
                     *results = Some(staged.into_iter());
                 }
-                Ok(results.as_mut().and_then(|iter| iter.next()))
+                Ok(results
+                    .as_mut()
+                    .and_then(|iter| iter.next())
+                    .map(|(row_id, row)| (Some(row_id), row)))
             }
             Executor::Limit { input, remaining } => {
                 if *remaining == 0 {
@@ -135,6 +153,14 @@ impl Executor {
                 if let Some(row_pair) = input.next(ctx)? {
                     *remaining -= 1;
                     Ok(Some(row_pair))
+                } else {
+                    Ok(None)
+                }
+            }
+            Executor::SingleRow { done } => {
+                if !*done {
+                    *done = true;
+                    Ok(Some((None, vec![])))
                 } else {
                     Ok(None)
                 }
@@ -216,7 +242,7 @@ mod tests {
     fn collect_all<S: Storage>(
         exec: &mut Executor,
         ctx: &mut ExecContext<S>,
-    ) -> Result<Vec<(RowId, Row)>, DbError> {
+    ) -> Result<Vec<(Option<RowId>, Row)>, DbError> {
         let mut out = Vec::new();
         while let Some(item) = exec.next(ctx)? {
             out.push(item);
@@ -265,8 +291,8 @@ mod tests {
         results.sort_by_key(|(id, _)| *id);
 
         let mut expected = vec![
-            (stored_match, vec![Value::Integer(10), Value::Bool(true)]),
-            (tx_match, vec![Value::Integer(7), Value::Bool(false)]),
+            (Some(stored_match), vec![Value::Integer(10), Value::Bool(true)]),
+            (Some(tx_match), vec![Value::Integer(7), Value::Bool(false)]),
         ];
         expected.sort_by_key(|(id, _)| *id);
 
@@ -379,8 +405,8 @@ mod tests {
             updated.sort_by_key(|(id, _)| *id);
 
             let mut expected = vec![
-                (invalid_id, task_row(2, 1, FAILED)),
-                (valid_id, task_row(5, 1, FAILED)),
+                (Some(invalid_id), task_row(2, 1, FAILED)),
+                (Some(valid_id), task_row(5, 1, FAILED)),
             ];
             expected.sort_by_key(|(id, _)| *id);
             assert_eq!(updated, expected);
@@ -428,7 +454,7 @@ mod tests {
                 clock: &clock,
             };
             let updated = collect_all(&mut plan, &mut ctx).unwrap();
-            assert_eq!(updated, vec![(valid_id, task_row(5, 1, FAILED))]);
+            assert_eq!(updated, vec![(Some(valid_id), task_row(5, 1, FAILED))]);
         }
 
         tx_ok.commit(&mut storage, &catalog, &clock).unwrap();
@@ -481,8 +507,8 @@ mod tests {
             deleted.sort_by_key(|(id, _)| *id);
 
             let mut expected = vec![
-                (stored_del_id, task_row(10, 0, PENDING)),
-                (tx_del_id, task_row(20, 0, PENDING)),
+                (Some(stored_del_id), task_row(10, 0, PENDING)),
+                (Some(tx_del_id), task_row(20, 0, PENDING)),
             ];
             expected.sort_by_key(|(id, _)| *id);
             assert_eq!(deleted, expected);
@@ -493,7 +519,10 @@ mod tests {
                 rows: None,
             };
             let remaining = collect_all(&mut scan, &mut ctx).unwrap();
-            assert_eq!(remaining, vec![(stored_keep_id, task_row(1, 0, PENDING))]);
+            assert_eq!(
+                remaining,
+                vec![(Some(stored_keep_id), task_row(1, 0, PENDING))]
+            );
         }
 
         // before commit, both original rows are still in Storage
@@ -530,5 +559,31 @@ mod tests {
         };
         let results = collect_all(&mut plan, &mut ctx).unwrap();
         assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_update_and_delete_require_row_id() {
+        let (storage, _catalog, clock) = setup();
+        let mut tx = Transaction::new();
+        let mut ctx = ExecContext {
+            tx: &mut tx,
+            storage: &storage,
+            clock: &clock,
+        };
+
+        let mut update = Executor::Update {
+            table: TABLE.to_string(),
+            input: Box::new(Executor::SingleRow { done: false }),
+            sets: vec![],
+            results: None,
+        };
+        assert!(matches!(update.next(&mut ctx), Err(DbError::ExecError(_))));
+
+        let mut delete = Executor::Delete {
+            table: TABLE.to_string(),
+            input: Box::new(Executor::SingleRow { done: false }),
+            results: None,
+        };
+        assert!(matches!(delete.next(&mut ctx), Err(DbError::ExecError(_))));
     }
 }

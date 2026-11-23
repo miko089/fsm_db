@@ -57,4 +57,7 @@ pub enum DbError {
 
     #[error("lex error: {0}")]
     LexError(String),
+
+    #[error("execution error: {0}")]
+    ExecError(String),
 }

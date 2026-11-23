@@ -35,6 +35,10 @@ pub(crate) enum Executor {
         input: Box<Executor>,
         results: Option<IntoIter<(RowId, Row)>>,
     },
+    Limit {
+        input: Box<Executor>,
+        remaining: usize,
+    },
 }
 
 pub(crate) struct ExecContext<'a, S: Storage> {
@@ -125,6 +129,17 @@ impl Executor {
                     *results = Some(deleted.into_iter());
                 }
                 Ok(results.as_mut().and_then(|iter| iter.next()))
+            }
+            Executor::Limit { input, remaining } => {
+                if *remaining == 0 {
+                    return Ok(None);
+                }
+                if let Some(row_pair) = input.next(ctx)? {
+                    *remaining -= 1;
+                    Ok(Some(row_pair))
+                } else {
+                    Ok(None)
+                }
             }
         }
     }
@@ -492,5 +507,30 @@ mod tests {
             storage.scan(TABLE).unwrap(),
             vec![(stored_keep_id, task_row(1, 0, PENDING))]
         );
+    }
+
+    #[test]
+    fn test_limit() {
+        let (mut storage, _catalog, clock) = setup();
+        storage.insert(TABLE, task_row(1, 0, PENDING)).unwrap();
+        storage.insert(TABLE, task_row(2, 0, PENDING)).unwrap();
+        storage.insert(TABLE, task_row(3, 0, PENDING)).unwrap();
+
+        let mut tx = Transaction::new();
+        let mut plan = Executor::Limit {
+            input: Box::new(Executor::SeqScan {
+                table: TABLE.to_string(),
+                rows: None,
+            }),
+            remaining: 2,
+        };
+
+        let mut ctx = ExecContext {
+            tx: &mut tx,
+            storage: &storage,
+            clock: &clock,
+        };
+        let results = collect_all(&mut plan, &mut ctx).unwrap();
+        assert_eq!(results.len(), 2);
     }
 }

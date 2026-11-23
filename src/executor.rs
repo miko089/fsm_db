@@ -121,12 +121,10 @@ impl Executor {
                     while let Some(item) = input.next(ctx)? {
                         staged.push(item);
                     }
-                    let mut deleted = Vec::with_capacity(staged.len());
-                    for (row_id, row) in staged {
-                        ctx.tx.delete(ctx.storage, table, row_id)?;
-                        deleted.push((row_id, row));
+                    for (row_id, _row) in staged.iter() {
+                        ctx.tx.delete(ctx.storage, table, *row_id)?;
                     }
-                    *results = Some(deleted.into_iter());
+                    *results = Some(staged.into_iter());
                 }
                 Ok(results.as_mut().and_then(|iter| iter.next()))
             }

@@ -1,6 +1,6 @@
 use std::io::{self, BufRead, IsTerminal, Write};
 
-use fsm_db::{Database, QueryResult, Value};
+use fsm_db::{Catalog, Database, FsmRef, QueryResult, Value};
 
 fn main() -> io::Result<()> {
     let stdin = io::stdin();
@@ -36,7 +36,7 @@ fn run_repl<R: BufRead, W: Write, E: Write>(
             let remaining = buffer.trim();
             if !remaining.is_empty() {
                 match db.execute(remaining) {
-                    Ok(results) => print_results(&results, out)?,
+                    Ok(results) => print_results(&results, db.catalog(), out)?,
                     Err(e) => writeln!(err, "Error: {e}")?,
                 }
             }
@@ -56,7 +56,7 @@ fn run_repl<R: BufRead, W: Write, E: Write>(
 
         if let Some(sql) = take_complete_sql(&mut buffer) {
             match db.execute(&sql) {
-                Ok(results) => print_results(&results, out)?,
+                Ok(results) => print_results(&results, db.catalog(), out)?,
                 Err(e) => writeln!(err, "Error: {e}")?,
             }
         }
@@ -93,13 +93,25 @@ fn take_complete_sql(buffer: &mut String) -> Option<String> {
     Some(sql)
 }
 
-fn print_results<W: Write>(results: &[QueryResult], out: &mut W) -> io::Result<()> {
+fn print_results<C: Catalog, W: Write>(
+    results: &[QueryResult],
+    catalog: &C,
+    out: &mut W,
+) -> io::Result<()> {
     for result in results {
         match result {
             QueryResult::Ok => writeln!(out, "OK")?,
-            QueryResult::Rows(rows) => {
+            QueryResult::Rows { rows, fsm_columns } => {
                 for row in rows {
-                    let formatted = row.iter().map(format_value).collect::<Vec<_>>().join(" | ");
+                    let formatted = row
+                        .iter()
+                        .enumerate()
+                        .map(|(col_idx, value)| {
+                            let fsm_ref = fsm_columns.get(col_idx).and_then(Option::as_ref);
+                            format_value(value, fsm_ref, catalog)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" | ");
                     writeln!(out, "{formatted}")?;
                 }
             }
@@ -108,11 +120,20 @@ fn print_results<W: Write>(results: &[QueryResult], out: &mut W) -> io::Result<(
     Ok(())
 }
 
-fn format_value(value: &Value) -> String {
+fn format_value<C: Catalog>(value: &Value, fsm_ref: Option<&FsmRef>, catalog: &C) -> String {
     match value {
         Value::Integer(n) => n.to_string(),
         Value::Float(f) => f.to_string(),
-        Value::Fsm(id) => format!("fsm({id})"),
+        Value::Fsm(id) => fsm_ref
+            .and_then(|r| {
+                catalog
+                    .get_table(&r.table)
+                    .ok()
+                    .flatten()
+                    .and_then(|schema| schema.fsm_state_name(r.fsm_idx, *id))
+            })
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("fsm({id})")),
         Value::Bool(b) => b.to_string(),
         Value::String(s) => s.clone(),
         Value::Null => "NULL".to_string(),
@@ -157,7 +178,7 @@ SELECT id, note, state FROM jobs;
 ";
         let (out, err) = run_script(script, false);
         assert_eq!(err, "");
-        assert_eq!(out, "OK\n1 | a;b'c | fsm(0)\n1 | a;b'c | fsm(0)\n");
+        assert_eq!(out, "OK\n1 | a;b'c | new\n1 | a;b'c | new\n");
     }
 
     #[test]
@@ -200,9 +221,63 @@ SELECT id, note, state FROM jobs;
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines.len(), 8);
         assert_eq!(&lines[0..5], &["OK", "OK", "OK", "OK", "OK"]);
-        assert_eq!(lines[5], "0 | false | init | fsm(0)");
-        assert_eq!(lines[6], "0 | false | init | fsm(0)");
+        assert_eq!(lines[5], "0 | false | init | pending");
+        assert_eq!(lines[6], "0 | false | init | pending");
         assert!(lines[7].starts_with("current time | "));
         assert!(lines[7].ends_with(" | 16"));
+    }
+
+    #[test]
+    fn multiple_fsm_columns_reordered_repeated_and_dml_print_state_names() {
+        let script = "\
+CREATE TABLE orders (
+    id INTEGER,
+    payment FSM (
+        STATES ('unpaid', 'paid', 'refunded'),
+        INITIAL 'unpaid',
+        TRANSITIONS ('unpaid' -> 'paid', 'paid' -> 'refunded')
+    ),
+    shipping FSM (
+        STATES ('pending', 'shipped', 'delivered'),
+        INITIAL 'pending',
+        TRANSITIONS ('pending' -> 'shipped', 'shipped' -> 'delivered')
+    )
+);
+INSERT INTO orders VALUES (10, 'unpaid', 'pending');
+UPDATE orders SET payment = 'paid', shipping = 'shipped' WHERE id = 10;
+SELECT shipping, id, payment, payment = 'paid' FROM orders;
+SELECT payment, payment FROM orders;
+DELETE FROM orders WHERE shipping = 'shipped';
+";
+        let (out, err) = run_script(script, false);
+        assert_eq!(err, "");
+        assert_eq!(
+            out,
+            "\
+OK
+10 | unpaid | pending
+10 | paid | shipped
+shipped | 10 | paid | true
+paid | paid
+10 | paid | shipped
+"
+        );
+    }
+
+    #[test]
+    fn format_value_falls_back_to_fsm_id_when_catalog_lookup_fails() {
+        let db = Database::in_memory();
+        let catalog = db.catalog();
+
+        assert_eq!(format_value(&Value::Fsm(3), None, catalog), "fsm(3)");
+
+        let missing_table = FsmRef {
+            table: "missing".to_string(),
+            fsm_idx: 0,
+        };
+        assert_eq!(
+            format_value(&Value::Fsm(2), Some(&missing_table), catalog),
+            "fsm(2)"
+        );
     }
 }

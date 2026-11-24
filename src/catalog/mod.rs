@@ -18,6 +18,14 @@ pub struct TableSchema {
 }
 
 impl TableSchema {
+    pub fn fsm_state_name(&self, fsm_idx: u32, state_id: u16) -> Option<&str> {
+        self.fsms
+            .get(fsm_idx as usize)?
+            .states
+            .get(state_id as usize)
+            .map(String::as_str)
+    }
+
     pub(crate) fn validate(&self) -> Result<(), DbError> {
         let mut column_names = HashSet::with_capacity(self.columns.len());
         for col in &self.columns {

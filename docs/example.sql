@@ -15,6 +15,7 @@ CREATE TABLE tasks (
 
 BEGIN;
 COMMIT;
+BEGIN;
 ROLLBACK;
 
 INSERT INTO tasks VALUES (0, false, 'init', 'pending');

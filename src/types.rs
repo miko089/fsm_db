@@ -55,6 +55,9 @@ pub enum DbError {
     #[error("evaluation error on: {0:?}")]
     EvalError(Expr),
 
+    #[error("guard failed: {0}")]
+    GuardFailed(String),
+
     #[error("lex error: {0}")]
     LexError(String),
 

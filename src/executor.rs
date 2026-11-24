@@ -415,7 +415,10 @@ mod tests {
             assert_eq!(updated, expected);
         }
 
-        assert!(tx_fail.commit(&mut storage, &catalog, &clock).is_err());
+        assert!(matches!(
+            tx_fail.commit(&mut storage, &catalog, &clock),
+            Err(DbError::GuardFailed(_))
+        ));
         assert_eq!(
             storage.get(TABLE, invalid_id).unwrap(),
             Some(task_row(1, 2, RUNNING))

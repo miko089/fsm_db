@@ -194,7 +194,10 @@ mod tests {
         // Transition 'running' -> 'failed' requires retries >= 3; at retries = 1 it must fail
         // and leave the persisted row untouched.
         assert!(
-            db.execute("UPDATE tasks SET state = 'failed';").is_err(),
+            matches!(
+                db.execute("UPDATE tasks SET state = 'failed';"),
+                Err(DbError::GuardFailed(_))
+            ),
             "transition to 'failed' with retries = 1 should violate FSM guard"
         );
 

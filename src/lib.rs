@@ -1,14 +1,15 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+#![allow(dead_code)]
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+mod binder;
+mod catalog;
+mod db;
+mod executor;
+mod expr;
+mod lexer;
+mod parser;
+mod storage;
+mod tx;
+mod types;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use db::{Database, QueryResult};
+pub use types::{DbError, Row, Value};

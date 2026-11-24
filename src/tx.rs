@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     catalog::{Catalog, TableSchema},
-    expr::{Clock, eval_expr},
+    expr::{Clock, eval_predicate},
     storage::Storage,
     types::{ColumnType, DbError, Row, RowId, Value},
 };
@@ -276,9 +276,21 @@ impl Transaction {
                                 old_state, new_state, schema.name
                             ))
                         })?;
-                        match eval_expr(guard, new_row, clock)? {
-                            Value::Bool(true) => {}
-                            _ => return Err(DbError::EvalError(guard.clone())),
+                        if !eval_predicate(guard, new_row, clock)? {
+                            let from = fsm
+                                .states
+                                .get(old_state as usize)
+                                .map(String::as_str)
+                                .unwrap_or("?");
+                            let to = fsm
+                                .states
+                                .get(new_state as usize)
+                                .map(String::as_str)
+                                .unwrap_or("?");
+                            return Err(DbError::GuardFailed(format!(
+                                "transition '{}' -> '{}' on {}.{}",
+                                from, to, schema.name, col.name
+                            )));
                         }
                     }
                 }
@@ -427,7 +439,17 @@ mod tests {
         tx_fail
             .update(&storage, TABLE, row_id, task_row(2, FAILED))
             .unwrap();
-        assert!(tx_fail.commit(&mut storage, &catalog, &clock).is_err());
+        let err = tx_fail.commit(&mut storage, &catalog, &clock).unwrap_err();
+        match err {
+            DbError::GuardFailed(msg) => {
+                assert!(
+                    msg.contains("'running' -> 'failed'"),
+                    "unexpected msg: {msg}"
+                );
+                assert!(msg.contains("tasks.state"), "unexpected msg: {msg}");
+            }
+            other => panic!("expected GuardFailed, got {other:?}"),
+        }
         assert_eq!(
             storage.get(TABLE, row_id).unwrap(),
             Some(task_row(1, RUNNING))
@@ -442,6 +464,43 @@ mod tests {
             storage.get(TABLE, row_id).unwrap(),
             Some(task_row(3, FAILED))
         );
+    }
+
+    #[test]
+    fn test_commit_fsm_guard_eval_error_stays_eval_error() {
+        let storage = InMemoryStorage::new();
+        let mut catalog = InMemoryCatalog::new();
+        let mut allowed = HashMap::new();
+        allowed.insert((PENDING, RUNNING), Expr::Literal(Value::Integer(42)));
+
+        let schema = TableSchema {
+            name: TABLE.to_string(),
+            columns: vec![
+                Column {
+                    name: "retries".to_string(),
+                    column_type: ColumnType::Integer,
+                },
+                Column {
+                    name: "state".to_string(),
+                    column_type: ColumnType::Fsm(0),
+                },
+            ],
+            fsms: vec![Fsm {
+                states: vec!["pending".into(), "running".into()],
+                initial: PENDING,
+                allowed,
+            }],
+        };
+        catalog.create_table(schema).unwrap();
+        let mut storage = storage;
+        let clock = MockClock { now: 1000 };
+        let row_id = storage.insert(TABLE, task_row(0, PENDING)).unwrap();
+
+        let mut tx = Transaction::new();
+        tx.update(&storage, TABLE, row_id, task_row(0, RUNNING))
+            .unwrap();
+        let err = tx.commit(&mut storage, &catalog, &clock).unwrap_err();
+        assert!(matches!(err, DbError::EvalError(_)));
     }
 
     #[test]

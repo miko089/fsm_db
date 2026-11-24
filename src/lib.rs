@@ -11,5 +11,6 @@ mod storage;
 mod tx;
 mod types;
 
-pub use db::{Database, QueryResult};
+pub use catalog::{Catalog, TableSchema};
+pub use db::{Database, FsmRef, QueryResult};
 pub use types::{DbError, Row, Value};

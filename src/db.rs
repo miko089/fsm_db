@@ -2,18 +2,27 @@ use crate::{
     binder::{BoundStatement, bind},
     catalog::{Catalog, InMemoryCatalog},
     executor::{ExecContext, Executor},
-    expr::{Clock, SystemClock},
+    expr::{Clock, Expr, SystemClock},
     lexer::tokenize,
     parser::parse,
     storage::{InMemoryStorage, Storage},
     tx::Transaction,
-    types::{DbError, Row},
+    types::{ColumnType, DbError, Row},
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FsmRef {
+    pub table: String,
+    pub fsm_idx: u32,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum QueryResult {
     Ok,
-    Rows(Vec<Row>),
+    Rows {
+        rows: Vec<Row>,
+        fsm_columns: Vec<Option<FsmRef>>,
+    },
 }
 
 pub struct Database<S: Storage, C: Catalog> {
@@ -31,6 +40,10 @@ impl<S: Storage, C: Catalog> Database<S, C> {
             clock,
             active_tx: None,
         }
+    }
+
+    pub fn catalog(&self) -> &C {
+        &self.catalog
     }
 
     pub fn execute(&mut self, sql: &str) -> Result<Vec<QueryResult>, DbError> {
@@ -73,6 +86,7 @@ impl<S: Storage, C: Catalog> Database<S, C> {
                     results.push(QueryResult::Ok);
                 }
                 BoundStatement::Execute(mut exec) => {
+                    let fsm_columns = Self::output_fsm_columns(&exec, &self.catalog)?;
                     let rows = if let Some(tx) = self.active_tx.as_mut() {
                         Self::drain_executor(&mut exec, tx, &self.storage, self.clock.as_ref())?
                     } else {
@@ -86,12 +100,52 @@ impl<S: Storage, C: Catalog> Database<S, C> {
                         tx.commit(&mut self.storage, &self.catalog, self.clock.as_ref())?;
                         rows
                     };
-                    results.push(QueryResult::Rows(rows));
+                    results.push(QueryResult::Rows { rows, fsm_columns });
                 }
             }
         }
 
         Ok(results)
+    }
+
+    fn table_fsm_columns(table: &str, catalog: &C) -> Result<Vec<Option<FsmRef>>, DbError> {
+        let schema = catalog
+            .get_table(table)?
+            .ok_or_else(|| DbError::TableNotFound(table.to_string()))?;
+        Ok(schema
+            .columns
+            .iter()
+            .map(|col| match col.column_type {
+                ColumnType::Fsm(fsm_idx) => Some(FsmRef {
+                    table: schema.name.clone(),
+                    fsm_idx,
+                }),
+                _ => None,
+            })
+            .collect())
+    }
+
+    fn output_fsm_columns(exec: &Executor, catalog: &C) -> Result<Vec<Option<FsmRef>>, DbError> {
+        match exec {
+            Executor::SeqScan { table, .. }
+            | Executor::Insert { table, .. }
+            | Executor::Update { table, .. }
+            | Executor::Delete { table, .. } => Self::table_fsm_columns(table, catalog),
+            Executor::Filter { input, .. } | Executor::Limit { input, .. } => {
+                Self::output_fsm_columns(input, catalog)
+            }
+            Executor::Project { input, cols } => {
+                let input_cols = Self::output_fsm_columns(input, catalog)?;
+                Ok(cols
+                    .iter()
+                    .map(|expr| match expr {
+                        Expr::Column(idx) => input_cols.get(*idx).cloned().flatten(),
+                        _ => None,
+                    })
+                    .collect())
+            }
+            Executor::SingleRow { .. } => Ok(Vec::new()),
+        }
     }
 
     fn drain_executor(
@@ -145,10 +199,18 @@ mod tests {
         Database::with_clock(Box::new(MockClock { now }))
     }
 
+    fn tasks_fsm_ref() -> FsmRef {
+        FsmRef {
+            table: "tasks".to_string(),
+            fsm_idx: 0,
+        }
+    }
+
     #[test]
     fn test_example_sql_with_mock_clock() {
         let mut db = db_with_clock(1_700_000_000);
         let results = db.execute(EXAMPLE_SQL).unwrap();
+        let tasks_fsm = vec![None, None, None, Some(tasks_fsm_ref())];
 
         assert_eq!(
             results,
@@ -158,26 +220,44 @@ mod tests {
                 QueryResult::Ok, // COMMIT
                 QueryResult::Ok, // BEGIN
                 QueryResult::Ok, // ROLLBACK
-                QueryResult::Rows(vec![vec![
-                    Value::Integer(0),
-                    Value::Bool(false),
-                    Value::String("init".to_string()),
-                    Value::Fsm(0),
-                ]]), // INSERT
-                QueryResult::Rows(vec![]), // SELECT retries, state WHERE retries >= 1
-                QueryResult::Rows(vec![vec![
-                    Value::Integer(0),
-                    Value::Bool(false),
-                    Value::String("init".to_string()),
-                    Value::Fsm(0),
-                ]]), // SELECT * FROM tasks
-                QueryResult::Rows(vec![vec![
-                    Value::String("current time".to_string()),
-                    Value::Integer(1_700_000_000),
-                    Value::Integer(16),
-                ]]), // SELECT 'current time', NOW, 2 * 8
-                QueryResult::Rows(vec![]), // UPDATE WHERE state = 'running'
-                QueryResult::Rows(vec![]), // DELETE WHERE state = 'done'
+                QueryResult::Rows {
+                    rows: vec![vec![
+                        Value::Integer(0),
+                        Value::Bool(false),
+                        Value::String("init".to_string()),
+                        Value::Fsm(0),
+                    ]],
+                    fsm_columns: tasks_fsm.clone(),
+                }, // INSERT
+                QueryResult::Rows {
+                    rows: vec![],
+                    fsm_columns: vec![None, Some(tasks_fsm_ref())],
+                }, // SELECT retries, state WHERE retries >= 1
+                QueryResult::Rows {
+                    rows: vec![vec![
+                        Value::Integer(0),
+                        Value::Bool(false),
+                        Value::String("init".to_string()),
+                        Value::Fsm(0),
+                    ]],
+                    fsm_columns: tasks_fsm.clone(),
+                }, // SELECT * FROM tasks
+                QueryResult::Rows {
+                    rows: vec![vec![
+                        Value::String("current time".to_string()),
+                        Value::Integer(1_700_000_000),
+                        Value::Integer(16),
+                    ]],
+                    fsm_columns: vec![None, None, None],
+                }, // SELECT 'current time', NOW, 2 * 8
+                QueryResult::Rows {
+                    rows: vec![],
+                    fsm_columns: tasks_fsm.clone(),
+                }, // UPDATE WHERE state = 'running'
+                QueryResult::Rows {
+                    rows: vec![],
+                    fsm_columns: tasks_fsm,
+                }, // DELETE WHERE state = 'done'
             ]
         );
     }
@@ -194,7 +274,10 @@ mod tests {
         // Transition 'running' -> 'failed' requires retries >= 3; at retries = 1 it must fail
         // and leave the persisted row untouched.
         assert!(
-            db.execute("UPDATE tasks SET state = 'failed';").is_err(),
+            matches!(
+                db.execute("UPDATE tasks SET state = 'failed';"),
+                Err(DbError::GuardFailed(_))
+            ),
             "transition to 'failed' with retries = 1 should violate FSM guard"
         );
 
@@ -205,7 +288,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             after_failed_attempt,
-            QueryResult::Rows(vec![vec![Value::Integer(1), Value::Fsm(1)]])
+            QueryResult::Rows {
+                rows: vec![vec![Value::Integer(1), Value::Fsm(1)]],
+                fsm_columns: vec![None, Some(tasks_fsm_ref())],
+            }
         );
 
         // Increment retries to 2, then increment to 3 while transitioning to 'failed'.
@@ -221,7 +307,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             final_rows,
-            QueryResult::Rows(vec![vec![Value::Integer(3), Value::Fsm(2)]])
+            QueryResult::Rows {
+                rows: vec![vec![Value::Integer(3), Value::Fsm(2)]],
+                fsm_columns: vec![None, Some(tasks_fsm_ref())],
+            }
         );
     }
 
@@ -241,9 +330,14 @@ mod tests {
                  SELECT retries, title, state FROM tasks;",
             )
             .unwrap();
-        let QueryResult::Rows(mut rows_in_tx) = in_tx.into_iter().last().unwrap() else {
+        let QueryResult::Rows {
+            rows: mut rows_in_tx,
+            fsm_columns,
+        } = in_tx.into_iter().last().unwrap()
+        else {
             panic!("expected Rows from SELECT inside tx");
         };
+        assert_eq!(fsm_columns, vec![None, None, Some(tasks_fsm_ref())]);
         rows_in_tx.sort_by_key(|row| match row[0] {
             Value::Integer(n) => n,
             _ => unreachable!(),
@@ -272,11 +366,14 @@ mod tests {
             after_rollback,
             vec![
                 QueryResult::Ok,
-                QueryResult::Rows(vec![vec![
-                    Value::Integer(0),
-                    Value::String("initial".to_string()),
-                    Value::Fsm(0),
-                ]]),
+                QueryResult::Rows {
+                    rows: vec![vec![
+                        Value::Integer(0),
+                        Value::String("initial".to_string()),
+                        Value::Fsm(0),
+                    ]],
+                    fsm_columns: vec![None, None, Some(tasks_fsm_ref())],
+                },
             ]
         );
 
@@ -310,11 +407,14 @@ mod tests {
             .unwrap();
         assert_eq!(
             persisted.into_iter().last().unwrap(),
-            QueryResult::Rows(vec![vec![
-                Value::Integer(0),
-                Value::String("initial".to_string()),
-                Value::Fsm(0),
-            ]])
+            QueryResult::Rows {
+                rows: vec![vec![
+                    Value::Integer(0),
+                    Value::String("initial".to_string()),
+                    Value::Fsm(0),
+                ]],
+                fsm_columns: vec![None, None, Some(tasks_fsm_ref())],
+            }
         );
     }
 
@@ -324,11 +424,14 @@ mod tests {
         let results = db.execute("SELECT 'current time', NOW, 2 * 8;").unwrap();
         assert_eq!(
             results,
-            vec![QueryResult::Rows(vec![vec![
-                Value::String("current time".to_string()),
-                Value::Integer(123_456),
-                Value::Integer(16),
-            ]])]
+            vec![QueryResult::Rows {
+                rows: vec![vec![
+                    Value::String("current time".to_string()),
+                    Value::Integer(123_456),
+                    Value::Integer(16),
+                ]],
+                fsm_columns: vec![None, None, None],
+            }]
         );
     }
 
@@ -346,14 +449,14 @@ mod tests {
             results,
             vec![
                 QueryResult::Ok,
-                QueryResult::Rows(vec![vec![
-                    Value::Integer(42),
-                    Value::String("ok".to_string()),
-                ]]),
-                QueryResult::Rows(vec![vec![
-                    Value::Integer(42),
-                    Value::String("ok".to_string()),
-                ]]),
+                QueryResult::Rows {
+                    rows: vec![vec![Value::Integer(42), Value::String("ok".to_string()),]],
+                    fsm_columns: vec![None, None],
+                },
+                QueryResult::Rows {
+                    rows: vec![vec![Value::Integer(42), Value::String("ok".to_string()),]],
+                    fsm_columns: vec![None, None],
+                },
             ]
         );
     }

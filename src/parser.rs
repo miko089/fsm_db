@@ -42,8 +42,8 @@ pub(crate) enum SelectItem {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ColumnDef {
-    name: String,
-    col_type: ColumnTypeAst,
+    pub(crate) name: String,
+    pub(crate) col_type: ColumnTypeAst,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,16 +57,16 @@ pub(crate) enum ColumnTypeAst {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FsmDef {
-    states: Vec<String>,
-    initial: String,
-    transitions: Vec<TransitionDef>,
+    pub(crate) states: Vec<String>,
+    pub(crate) initial: String,
+    pub(crate) transitions: Vec<TransitionDef>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TransitionDef {
-    from: String,
-    to: String,
-    guard: Option<AstExpr>,
+    pub(crate) from: String,
+    pub(crate) to: String,
+    pub(crate) guard: Option<AstExpr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

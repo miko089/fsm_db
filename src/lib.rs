@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod binder;
 mod catalog;
 mod executor;
 mod expr;

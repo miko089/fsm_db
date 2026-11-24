@@ -61,6 +61,9 @@ pub enum DbError {
     #[error("parse error: {0}")]
     ParseError(String),
 
+    #[error("bind error: {0}")]
+    BindError(String),
+
     #[error("execution error: {0}")]
     ExecError(String),
 }

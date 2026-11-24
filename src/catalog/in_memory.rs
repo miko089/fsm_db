@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::catalog::{Catalog, TableSchema};
 use crate::types::DbError;
 
-pub(crate) struct InMemoryCatalog {
+pub struct InMemoryCatalog {
     tables: HashMap<String, TableSchema>,
 }
 

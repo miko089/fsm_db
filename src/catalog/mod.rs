@@ -1,6 +1,5 @@
 mod in_memory;
 
-#[cfg(test)]
 pub(crate) use in_memory::InMemoryCatalog;
 
 use std::collections::HashSet;
@@ -12,7 +11,7 @@ pub(crate) struct Column {
     pub(crate) column_type: ColumnType,
 }
 
-pub(crate) struct TableSchema {
+pub struct TableSchema {
     pub(crate) name: String,
     pub(crate) columns: Vec<Column>,
     pub(crate) fsms: Vec<Fsm>,
@@ -82,7 +81,7 @@ impl TableSchema {
     }
 }
 
-pub(crate) trait Catalog {
+pub trait Catalog {
     fn create_table(&mut self, schema: TableSchema) -> Result<(), DbError>;
     fn get_table(&self, table_name: &str) -> Result<Option<&TableSchema>, DbError>;
 }

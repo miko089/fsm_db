@@ -2,6 +2,7 @@
 
 mod binder;
 mod catalog;
+mod db;
 mod executor;
 mod expr;
 mod lexer;
@@ -9,3 +10,6 @@ mod parser;
 mod storage;
 mod tx;
 mod types;
+
+pub use db::{Database, QueryResult};
+pub use types::{DbError, Row, Value};

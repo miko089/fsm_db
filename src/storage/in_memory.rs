@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::storage::Storage;
 use crate::types::{DbError, Row, RowId};
 
-pub(crate) struct InMemoryStorage {
+pub struct InMemoryStorage {
     tables: HashMap<String, Vec<(RowId, Row)>>,
     last: usize,
 }

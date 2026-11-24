@@ -313,10 +313,12 @@ mod tests {
             RParen,
             RParen,
             Semicolon,
-            // BEGIN; COMMIT; ROLLBACK;
+            // BEGIN; COMMIT; BEGIN; ROLLBACK;
             kw("BEGIN"),
             Semicolon,
             kw("COMMIT"),
+            Semicolon,
+            kw("BEGIN"),
             Semicolon,
             kw("ROLLBACK"),
             Semicolon,

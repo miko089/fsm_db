@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::types::{DbError, Row, Value};
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum BinaryOp {
+pub enum BinaryOp {
     Eq,  // =
     Ne,  // !=
     Lt,  // <
@@ -19,7 +19,7 @@ pub(crate) enum BinaryOp {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Expr {
+pub enum Expr {
     Literal(Value),
     Column(usize),
     CurrentTime,
@@ -33,7 +33,7 @@ pub(crate) enum Expr {
     },
 }
 
-pub(crate) trait Clock {
+pub trait Clock {
     fn now(&self) -> i64;
 }
 

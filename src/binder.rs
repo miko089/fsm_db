@@ -931,7 +931,7 @@ mod tests {
         let sql = include_str!("../docs/example.sql");
         let tokens = tokenize(sql).unwrap();
         let stmts = parse(&tokens).unwrap();
-        assert_eq!(stmts.len(), 10);
+        assert_eq!(stmts.len(), 11);
 
         let mut catalog = InMemoryCatalog::new();
         let mut bound_kinds = Vec::new();
@@ -961,8 +961,8 @@ mod tests {
         assert_eq!(
             bound_kinds,
             vec![
-                "create", "begin", "commit", "rollback", "insert", "limit", "limit", "project",
-                "update", "delete"
+                "create", "begin", "commit", "begin", "rollback", "insert", "limit", "limit",
+                "project", "update", "delete"
             ]
         );
     }

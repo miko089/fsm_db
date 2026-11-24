@@ -6,7 +6,7 @@ use thiserror::Error;
 pub(crate) use crate::expr::Expr;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Value {
+pub enum Value {
     Integer(i64),
     Float(f64),
     Fsm(u16),
@@ -30,10 +30,10 @@ pub(crate) enum ColumnType {
     String,
 }
 
-pub(crate) type Row = Vec<Value>;
+pub type Row = Vec<Value>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct RowId {
+pub struct RowId {
     pub(crate) page_id: u32,
     pub(crate) row_id: u16,
 }

@@ -562,7 +562,7 @@ mod tests {
         let tokens = tokenize(sql).unwrap();
         let stmts = parse(&tokens).unwrap();
 
-        assert_eq!(stmts.len(), 10);
+        assert_eq!(stmts.len(), 11);
 
         assert_eq!(
             stmts[0],
@@ -616,10 +616,11 @@ mod tests {
 
         assert_eq!(stmts[1], Statement::Begin);
         assert_eq!(stmts[2], Statement::Commit);
-        assert_eq!(stmts[3], Statement::Rollback);
+        assert_eq!(stmts[3], Statement::Begin);
+        assert_eq!(stmts[4], Statement::Rollback);
 
         assert_eq!(
-            stmts[7],
+            stmts[8],
             Statement::Select {
                 items: vec![
                     SelectItem::Expr(AstExpr::Literal(Value::String("current time".to_string()))),
@@ -633,7 +634,7 @@ mod tests {
         );
 
         assert_eq!(
-            stmts[8],
+            stmts[9],
             Statement::Update {
                 table: "tasks".to_string(),
                 sets: vec![

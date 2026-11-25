@@ -108,6 +108,6 @@ pub enum DbError {
     #[error("execution error: {0}")]
     ExecError(String),
 
-    #[error("error {0} row")]
+    #[error("codec error: {0}")]
     CodecError(String),
 }

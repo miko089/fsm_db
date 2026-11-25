@@ -15,6 +15,44 @@ pub enum Value {
     Null,
 }
 
+impl Value {
+    pub(crate) fn tag(&self) -> ValueTag {
+        match self {
+            Value::Integer(_) => ValueTag::Integer,
+            Value::Float(_) => ValueTag::Float,
+            Value::Fsm(_) => ValueTag::Fsm,
+            Value::Bool(_) => ValueTag::Bool,
+            Value::String(_) => ValueTag::String,
+            Value::Null => ValueTag::Null,
+        }
+    }
+}
+
+impl TryFrom<u8> for ValueTag {
+    type Error = DbError;
+    fn try_from(byte: u8) -> Result<Self, Self::Error> {
+        match byte {
+            0 => Ok(Self::Integer),
+            1 => Ok(Self::Float),
+            2 => Ok(Self::Fsm),
+            3 => Ok(Self::Bool),
+            4 => Ok(Self::String),
+            5 => Ok(Self::Null),
+            _ => Err(DbError::ExecError(format!("unknown value tag: {byte}"))),
+        }
+    }
+}
+
+#[repr(u8)]
+pub enum ValueTag {
+    Integer = 0,
+    Float = 1,
+    Fsm = 2,
+    Bool = 3,
+    String = 4,
+    Null = 5,
+}
+
 pub(crate) struct Fsm {
     pub(crate) states: Vec<String>,
     pub(crate) initial: u16,
@@ -69,4 +107,7 @@ pub enum DbError {
 
     #[error("execution error: {0}")]
     ExecError(String),
+
+    #[error("codec error: {0}")]
+    CodecError(String),
 }

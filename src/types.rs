@@ -110,4 +110,10 @@ pub enum DbError {
 
     #[error("codec error: {0}")]
     CodecError(String),
+
+    #[error("io error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("storage error: {0}")]
+    StorageError(String),
 }

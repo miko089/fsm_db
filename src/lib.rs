@@ -1,8 +1,10 @@
 #![allow(dead_code)]
 
 mod binder;
+mod buffer_pool;
 mod catalog;
 mod db;
+mod disk;
 mod executor;
 mod expr;
 mod lexer;

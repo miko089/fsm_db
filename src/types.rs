@@ -1,11 +1,12 @@
 #![allow(dead_code)]
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
 pub(crate) use crate::expr::Expr;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     Integer(i64),
     Float(f64),
@@ -53,13 +54,57 @@ pub enum ValueTag {
     Null = 5,
 }
 
+#[derive(Serialize, Deserialize)]
 pub(crate) struct Fsm {
     pub(crate) states: Vec<String>,
     pub(crate) initial: u16,
+    #[serde(with = "fsm_transitions_serde")]
     pub(crate) allowed: HashMap<(u16, u16), Expr>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+mod fsm_transitions_serde {
+    use std::collections::HashMap;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use crate::expr::Expr;
+
+    #[derive(Serialize)]
+    struct TransitionRef<'a> {
+        from: u16,
+        to: u16,
+        guard: &'a Expr,
+    }
+
+    #[derive(Deserialize)]
+    struct TransitionOwned {
+        from: u16,
+        to: u16,
+        guard: Expr,
+    }
+
+    pub fn serialize<S: Serializer>(
+        map: &HashMap<(u16, u16), Expr>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut entries: Vec<(&(u16, u16), &Expr)> = map.iter().collect();
+        entries.sort_by_key(|&(&(from, to), _)| (from, to));
+        let vec: Vec<TransitionRef<'_>> = entries
+            .into_iter()
+            .map(|(&(from, to), guard)| TransitionRef { from, to, guard })
+            .collect();
+        vec.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<HashMap<(u16, u16), Expr>, D::Error> {
+        let vec = Vec::<TransitionOwned>::deserialize(deserializer)?;
+        Ok(vec.into_iter().map(|t| ((t.from, t.to), t.guard)).collect())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum ColumnType {
     Integer,
     Float,
@@ -110,4 +155,10 @@ pub enum DbError {
 
     #[error("codec error: {0}")]
     CodecError(String),
+
+    #[error("io error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("storage error: {0}")]
+    StorageError(String),
 }

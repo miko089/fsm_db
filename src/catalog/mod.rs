@@ -1,16 +1,22 @@
+mod file;
 mod in_memory;
 
+pub use file::FileCatalog;
 pub(crate) use in_memory::InMemoryCatalog;
 
 use std::collections::HashSet;
 
+use serde::{Deserialize, Serialize};
+
 use crate::types::{ColumnType, DbError, Fsm};
 
+#[derive(Serialize, Deserialize)]
 pub(crate) struct Column {
     pub(crate) name: String,
     pub(crate) column_type: ColumnType,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct TableSchema {
     pub(crate) name: String,
     pub(crate) columns: Vec<Column>,

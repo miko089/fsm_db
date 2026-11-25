@@ -202,6 +202,7 @@ impl Transaction {
             }
         }
         self.next_pending_id = 0;
+        storage.flush()?;
 
         Ok(())
     }

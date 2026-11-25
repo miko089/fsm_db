@@ -8,6 +8,7 @@ mod expr;
 mod lexer;
 mod parser;
 mod row_codec;
+mod slotted_page;
 mod storage;
 mod tx;
 mod types;

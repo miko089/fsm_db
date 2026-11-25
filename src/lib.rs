@@ -7,6 +7,7 @@ mod executor;
 mod expr;
 mod lexer;
 mod parser;
+mod row_codec;
 mod storage;
 mod tx;
 mod types;

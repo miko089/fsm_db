@@ -1,8 +1,10 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
+
 use crate::types::{DbError, Row, Value};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum BinaryOp {
     Eq,  // =
     Ne,  // !=
@@ -18,7 +20,7 @@ pub enum BinaryOp {
     Div, // /
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Literal(Value),
     Column(usize),

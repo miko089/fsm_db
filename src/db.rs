@@ -1,14 +1,19 @@
+use std::fs;
+use std::path::Path;
+
 use crate::{
     binder::{BoundStatement, bind},
-    catalog::{Catalog, InMemoryCatalog},
+    catalog::{Catalog, FileCatalog, InMemoryCatalog},
     executor::{ExecContext, Executor},
     expr::{Clock, Expr, SystemClock},
     lexer::tokenize,
     parser::parse,
-    storage::{InMemoryStorage, Storage},
+    storage::{DiskStorage, InMemoryStorage, Storage},
     tx::Transaction,
     types::{ColumnType, DbError, Row},
 };
+
+const DEFAULT_BUFFER_POOL_CAPACITY: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FsmRef {
@@ -59,7 +64,9 @@ impl<S: Storage, C: Catalog> Database<S, C> {
                             "DDL is not supported inside a transaction".to_string(),
                         ));
                     }
+                    let table_name = schema.name.clone();
                     self.catalog.create_table(schema)?;
+                    self.storage.create_table(&table_name)?;
                     results.push(QueryResult::Ok);
                 }
                 BoundStatement::Begin => {
@@ -170,6 +177,19 @@ impl Database<InMemoryStorage, InMemoryCatalog> {
 
     pub fn with_clock(clock: Box<dyn Clock>) -> Self {
         Self::new(InMemoryStorage::new(), InMemoryCatalog::new(), clock)
+    }
+}
+
+impl Database<DiskStorage, FileCatalog> {
+    pub fn open(dir: &Path) -> Result<Self, DbError> {
+        Self::open_with_clock(dir, Box::new(SystemClock))
+    }
+
+    pub fn open_with_clock(dir: &Path, clock: Box<dyn Clock>) -> Result<Self, DbError> {
+        fs::create_dir_all(dir)?;
+        let catalog = FileCatalog::open(&dir.join("catalog.json"))?;
+        let storage = DiskStorage::open(dir, DEFAULT_BUFFER_POOL_CAPACITY)?;
+        Ok(Self::new(storage, catalog, clock))
     }
 }
 
@@ -459,5 +479,148 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn test_disk_persistence_across_restarts_e2e() {
+        use std::path::PathBuf;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+        struct TempDir {
+            path: PathBuf,
+        }
+
+        impl TempDir {
+            fn new(prefix: &str) -> Self {
+                let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+                let path = std::env::temp_dir()
+                    .join(format!("fsm_db_{prefix}_{}_{id}", std::process::id()));
+                let _ = fs::remove_dir_all(&path);
+                Self { path }
+            }
+        }
+
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.path);
+            }
+        }
+
+        let dir = TempDir::new("db_e2e_persist");
+        let short_note = "a".repeat(200);
+        let big_note = "b".repeat(1600);
+        let grown_note = "g".repeat(1500);
+
+        // Session 1: DDL with FSM + guard, INSERT, UPDATE growing string (forcing page relocation),
+        // DELETE, and BEGIN -> INSERT -> ROLLBACK.
+        {
+            let mut db =
+                Database::open_with_clock(&dir.path, Box::new(MockClock { now: 1000 })).unwrap();
+            db.execute(
+                "CREATE TABLE tasks (
+                    id INTEGER,
+                    note STRING,
+                    retries INTEGER,
+                    state FSM (
+                        STATES ('pending', 'running', 'failed', 'done'),
+                        INITIAL 'pending',
+                        TRANSITIONS (
+                            'pending' -> 'running',
+                            'running' -> 'done',
+                            'running' -> 'failed' WHEN retries >= 3
+                        )
+                    )
+                );",
+            )
+            .unwrap();
+
+            let insert_sql = format!(
+                "INSERT INTO tasks VALUES (1, '{short_note}', 0, 'pending');
+                 INSERT INTO tasks VALUES (2, '{big_note}', 0, 'pending');
+                 INSERT INTO tasks VALUES (3, 'to_delete', 0, 'pending');"
+            );
+            db.execute(&insert_sql).unwrap();
+
+            let update_sql = format!(
+                "UPDATE tasks SET note = '{grown_note}', retries = 1, state = 'running' WHERE id = 1;"
+            );
+            db.execute(&update_sql).unwrap();
+            db.execute("DELETE FROM tasks WHERE id = 3;").unwrap();
+
+            db.execute(
+                "BEGIN;
+                 INSERT INTO tasks VALUES (99, 'rolled_back', 0, 'pending');
+                 ROLLBACK;",
+            )
+            .unwrap();
+        }
+
+        // Session 2: reopen, verify persisted rows and absence of deleted/rolled-back rows,
+        // verify FSM guard rejects retries < 3, then perform valid guarded transition.
+        {
+            let mut db =
+                Database::open_with_clock(&dir.path, Box::new(MockClock { now: 2000 })).unwrap();
+            let QueryResult::Rows {
+                mut rows,
+                fsm_columns,
+            } = db
+                .execute("SELECT id, note, retries, state FROM tasks;")
+                .unwrap()
+                .pop()
+                .unwrap()
+            else {
+                panic!("expected Rows from SELECT");
+            };
+
+            assert_eq!(fsm_columns, vec![None, None, None, Some(tasks_fsm_ref())]);
+            rows.sort_by_key(|row| match row[0] {
+                Value::Integer(id) => id,
+                _ => unreachable!(),
+            });
+            assert_eq!(
+                rows,
+                vec![
+                    vec![
+                        Value::Integer(1),
+                        Value::String(grown_note.clone()),
+                        Value::Integer(1),
+                        Value::Fsm(1),
+                    ],
+                    vec![
+                        Value::Integer(2),
+                        Value::String(big_note.clone()),
+                        Value::Integer(0),
+                        Value::Fsm(0),
+                    ],
+                ]
+            );
+
+            assert!(matches!(
+                db.execute("UPDATE tasks SET state = 'failed' WHERE id = 1;"),
+                Err(DbError::GuardFailed(_))
+            ));
+
+            db.execute("UPDATE tasks SET retries = 3, state = 'failed' WHERE id = 1;")
+                .unwrap();
+        }
+
+        // Session 3: reopen and confirm the updated FSM state persisted.
+        {
+            let mut db = Database::open(&dir.path).unwrap();
+            let result = db
+                .execute("SELECT id, retries, state FROM tasks WHERE id = 1;")
+                .unwrap()
+                .pop()
+                .unwrap();
+            assert_eq!(
+                result,
+                QueryResult::Rows {
+                    rows: vec![vec![Value::Integer(1), Value::Integer(3), Value::Fsm(2)]],
+                    fsm_columns: vec![None, None, Some(tasks_fsm_ref())],
+                }
+            );
+        }
     }
 }

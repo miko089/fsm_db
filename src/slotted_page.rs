@@ -2,6 +2,7 @@ pub(crate) const PAGE_SIZE: usize = 4096;
 pub(crate) const NO_NEXT_PAGE: u32 = u32::MAX;
 const HEADER_SIZE: usize = 8;
 const SLOT_SIZE: usize = 4;
+pub(crate) const MAX_RECORD_SIZE: usize = PAGE_SIZE - HEADER_SIZE - SLOT_SIZE;
 
 /// 0..4 -> `next_page_id`: `NO_NEXT_PAGE` if last page of a table
 /// 4..6 -> `slot_count`: 0 at start
@@ -193,8 +194,17 @@ impl SlottedPage {
     }
 
     pub(crate) fn get(&self, slot_id: u16) -> Option<&[u8]> {
-        PageSlot::decode(&self.page, slot_id)
-            .map(|slot| &self.page[slot.offset as usize..(slot.offset + slot.len) as usize])
+        let header = PageHeader::decode(&self.page);
+        if slot_id >= header.slot_count {
+            return None;
+        }
+        let slot = PageSlot::decode(&self.page, slot_id)?;
+        if slot.is_deleted() {
+            return None;
+        }
+        let start = slot.offset as usize;
+        let end = start.checked_add(slot.len as usize)?;
+        self.page.get(start..end)
     }
 
     pub(crate) fn delete(&mut self, slot_id: u16) -> bool {
@@ -483,5 +493,22 @@ mod tests {
 
         assert!(sp.delete(0));
         assert!(!sp.update_in_place(0, b"revive"));
+    }
+
+    #[test]
+    fn get_returns_none_for_out_of_bounds_and_deleted_slots() {
+        let mut sp = SlottedPage::new();
+        assert_eq!(sp.get(0), None);
+        assert_eq!(sp.get(u16::MAX), None);
+
+        let s0 = sp.insert(b"alpha").unwrap();
+        let s1 = sp.insert(b"beta").unwrap();
+        assert_eq!(sp.get(s0), Some(b"alpha".as_slice()));
+        assert_eq!(sp.get(s1), Some(b"beta".as_slice()));
+        assert_eq!(sp.get(2), None);
+
+        assert!(sp.delete(s0));
+        assert_eq!(sp.get(s0), None);
+        assert_eq!(sp.get(s1), Some(b"beta".as_slice()));
     }
 }

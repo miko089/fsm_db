@@ -15,6 +15,8 @@ mod storage;
 mod tx;
 mod types;
 
-pub use catalog::{Catalog, TableSchema};
+pub use catalog::{Catalog, FileCatalog, TableSchema};
 pub use db::{Database, FsmRef, QueryResult};
+pub use expr::Clock;
+pub use storage::{DiskStorage, Storage};
 pub use types::{DbError, Row, Value};

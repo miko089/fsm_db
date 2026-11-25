@@ -1,22 +1,46 @@
 use std::io::{self, BufRead, IsTerminal, Write};
+use std::path::Path;
 
-use fsm_db::{Catalog, Database, FsmRef, QueryResult, Value};
+use fsm_db::{Catalog, Database, FsmRef, QueryResult, Storage, Value};
 
 fn main() -> io::Result<()> {
+    let mut args = std::env::args_os().skip(1);
+    let dir_arg = args.next();
+    if args.next().is_some() {
+        eprintln!("Usage: fsm_db [data_dir]");
+        std::process::exit(1);
+    }
+
     let stdin = io::stdin();
     let interactive = stdin.is_terminal();
     let mut stdout = io::stdout().lock();
     let mut stderr = io::stderr().lock();
-    run_repl(stdin.lock(), &mut stdout, &mut stderr, interactive)
+
+    match dir_arg {
+        Some(dir) => {
+            let mut db = match Database::open(Path::new(&dir)) {
+                Ok(db) => db,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            };
+            run_repl(&mut db, stdin.lock(), &mut stdout, &mut stderr, interactive)
+        }
+        None => {
+            let mut db = Database::in_memory();
+            run_repl(&mut db, stdin.lock(), &mut stdout, &mut stderr, interactive)
+        }
+    }
 }
 
-fn run_repl<R: BufRead, W: Write, E: Write>(
+fn run_repl<S: Storage, C: Catalog, R: BufRead, W: Write, E: Write>(
+    db: &mut Database<S, C>,
     mut input: R,
     out: &mut W,
     err: &mut E,
     interactive: bool,
 ) -> io::Result<()> {
-    let mut db = Database::in_memory();
     let mut buffer = String::new();
     let mut line = String::new();
 
@@ -146,9 +170,11 @@ mod tests {
     use std::io::Cursor;
 
     fn run_script(script: &str, interactive: bool) -> (String, String) {
+        let mut db = Database::in_memory();
         let mut out = Vec::new();
         let mut err = Vec::new();
         run_repl(
+            &mut db,
             Cursor::new(script.as_bytes()),
             &mut out,
             &mut err,
